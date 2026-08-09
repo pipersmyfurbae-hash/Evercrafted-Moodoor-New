@@ -1,0 +1,27 @@
+[project]
+name = "empathy-engine"
+version = "0.1.0"
+description = "Evercrafted Empathy Engine — emotional input to sellable wreath blueprint."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2.9",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.2",
+    "uvicorn>=0.32",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers"
+markers = [
+    "tripwire: drift guards from CLAUDE.md 'Preventing Drift' item 5",
+]
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
