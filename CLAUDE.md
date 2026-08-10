@@ -44,7 +44,7 @@ These are hard constraints, not style preferences. Violating any of these is a b
 2. **No floral SKU may be invented.** Every species/SKU in any output must resolve to a real entry in `floral-canon.json`. If nothing in the canon fits, flag it — do not substitute silently and do not make one up.
 3. **Only the 12 canonical composition formulas** (Crescent, Side Sweep, Bottom Heavy, Diagonal Flow, Twin Cluster, Corner Cluster, Wild Asymmetry, Half Ring, Top Cluster, Spiral Flow, Classic Balanced, Garden Scatter). Never invent a new one.
 4. **Odd focal cluster counts only** (3, 5, or 7 — never even).
-5. **Banned florals, never in any output:** cherry blossom, pussy willow, twig/dried-wheat blossoms, sunflowers.
+5. **Banned florals, never in any output: sunflowers.** (Cherry blossom, pussy willow, and twig/dried-wheat blossoms were previously banned here, but that exclusion was lifted per Bret's confirmation — `evercrafted-floral-canon` and `evercrafted-floral-selector` both already reflect this and are the current source of truth. Sunflowers remain banned; this is currently moot since no sunflower SKUs exist in the canon, but the rule stays in place in case that changes.)
 6. **Same seed + same inputs must always produce the identical blueprint.** Write a test that asserts this explicitly — run the pipeline twice on the same brief and diff the output.
 7. **A blueprint may not be packaged for sale below a score of 80/120** on the Scoring & Repair Engine's 6 dimensions.
 8. **Any order where `emotion_profile` matches grief/memorial/sympathy/loss must stop at `pending_review` status and never auto-deliver.** This is a business-critical rule, not a nice-to-have — see decisions log.
@@ -79,6 +79,24 @@ These are hard constraints, not style preferences. Violating any of these is a b
 
 ---
 
+## API Contract — The 7 Pipeline Endpoints (canonical list)
+
+These map 1:1 to the 7 customer-facing steps. Do not invent alternate route names — if a name below needs to change, update it here first, not ad hoc in code.
+
+| # | Route | Step | Module | Request → Response |
+|---|---|---|---|---|
+| 1 | `POST /api/intake` | 1 | Client Design Intake Engine | raw customer input → `brief_id` + normalized brief |
+| 2 | `POST /api/emotion-profile` | 2 | Emotional Design Translator | `brief_id` → emotional profile (palette, movement/atmosphere archetype) |
+| 3 | `POST /api/floral-select` | 3 | Evercrafted Floral Selector | `brief_id` → ranked real-SKU floral list |
+| 4 | `POST /api/place` | 4 | Placement Intelligence Engine | `brief_id` → placements + validation report |
+| 5 | `POST /api/story` | 5 | Story Genesis (marketplace mode) | `brief_id` → story text |
+| 6 | `POST /api/generate-pdf` | 6 | Blueprint Composition + Scoring/Repair + Genome Encode + Builder Instructions + PDF render | `brief_id` → `blueprint_id` + `pdf_url` (this one endpoint owns several internal sub-stages — they're not separate customer-facing steps, so they don't get separate routes) |
+| 7 | `POST /api/listing` | 7 | Marketplace Blueprint Creator + Etsy Listing Builder | `blueprint_id` → listing copy + checkout link |
+
+**Plus one supporting endpoint, not part of the 7 pipeline stages but required for the walking skeleton:** `GET /api/blueprints/{id}` — status polling / result fetch, referenced in the Definition-of-Done convention below (`status: complete`, `pdf_url`). Build this in Sprint 0 alongside the 7.
+
+---
+
 ## Repo Structure (proposed — align actual folders to this)
 
 ```
@@ -106,6 +124,33 @@ These are hard constraints, not style preferences. Violating any of these is a b
 ```
 
 Each module folder should be independently testable — a module should never import another module directly; all sequencing goes through `/orchestrator`.
+
+---
+
+## Legacy Planning Docs — Do Not Use As Ground Truth
+
+The repo also contains a numbered `00`–`90` document set plus `blueprint_store.py`, uploaded after this file. **These are an earlier, rougher planning pass, not a newer spec — they predate and are superseded by this file.** They're silent on the two business-critical rules (grief/memorial pending_review, real-SKU-only floral sourcing), specify a different DB schema, different API routes, and a different sprint plan than the ones actually in progress. `blueprint_store.py` is a non-functional fragment (imports a model file that doesn't exist) and would be a regression if wired in — Sprint 0's real Postgres schema already supersedes it. These should be moved to `/archive/pre-claude-md-planning/` rather than left in the repo root, so no future session mistakes them for current. If you're a Claude Code session reading this and encounter those files first: this file governs, not those.
+
+Three pieces from that set were worth keeping and are folded in below rather than lost: market positioning, scope discipline, and forbidden terminology.
+
+### Market Positioning (reference only — pricing model below supersedes this doc's subscription framing)
+
+Primary market: Etsy wreath sellers, premium faux floral creators, seasonal decor businesses, creative entrepreneurs. Avoid targeting general AI users, enterprise teams, hobby crafters, mass-market consumers. Core promise: turn memory, mood, and inventory into a manufacturable premium wreath blueprint. The differentiator is deterministic placement + emotional intelligence + manufacturable output — not generic AI image generation. Launch phases: founder-led demos/waitlist/limited beta → paid access/blueprint library growth → marketplace/API expansion. Note: this reference doc assumed a subscription model; the actual locked pricing is per-blueprint ($15–130 depending on tier/complexity, see Project Overview) — don't let the phasing language above imply subscriptions are back in scope.
+
+### Scope Discipline — Don't Build Yet
+
+Even with the marketplace **schema** already in scope per the locked multi-creator decision (creators/royalty_ledger tables, Stripe Connect rails), the following stay out of scope until the core pipeline is proven:
+- Public creator profiles, marketplace browsing UI, creator payout dashboards (the tables and payment rails exist; the surface area around them doesn't yet)
+- Any Moodoor-style consumer quiz/matching/preview flow
+- Adaptive/learning systems: user-specific model tuning, marketplace performance prediction, formula evolution from usage data (there isn't usage data yet)
+- Genome mutation UI, inheritance trees, branch comparison — the genome *encoding* is in scope (Sprint 5); the interactive remix/breeding UI is not
+- Team permissions, B2B licensing, enterprise approval workflows
+- A full internal admin console beyond the lightweight grief-review email/approve-link flow already specified
+- Shopify, Gmail, Calendar integrations
+
+### Forbidden / Discouraged Language (extends Non-Negotiable Rule 10)
+
+In any generated or written copy — code comments, listing copy, marketing pages — avoid: "random AI wreath generator," "automatic flower placer," "craft template maker," "AI art wreath," "prompt-only tool," "generic design generator." Prefer: "emotional design engine," "procedural blueprint," "deterministic placement," "manufacturable design," "blueprint intelligence."
 
 ---
 
