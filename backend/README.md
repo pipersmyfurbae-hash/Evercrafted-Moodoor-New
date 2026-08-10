@@ -29,7 +29,7 @@ backend/
   schemas/           shared contracts (Pydantic). Not a module; modules may import it.
   modules/           the 10 pipeline modules. None may import another.
   orchestrator/      the only place modules are sequenced. Wired in Sprint 1.
-  api/               FastAPI app. Pipeline routes pending the CLAUDE.md contract table.
+  api/               FastAPI app + the 7-endpoint contract stub
   db/                models, session, Alembic migrations
   data/              vendored floral-canon.json snapshot
   tests/
@@ -53,6 +53,24 @@ its rule is violated — a tripwire that cannot fail guards nothing.
 `tests/contract/test_module_isolation.py` supports the first: if modules could
 import each other, placement could reach an LLM one hop away and the static
 scan would still pass.
+
+## The API contract
+
+`api/routes.py` declares the 7 pipeline endpoints plus `GET
+/api/blueprints/{id}`, transcribed from CLAUDE.md's canonical route table.
+Shapes are real; bodies are not — every stub returns **501**, never fabricated
+data, so a client can always tell a stub from a working endpoint.
+
+Route names live in CLAUDE.md. To change one, change it there first, then here
+— `tests/contract/test_api_contract.py` asserts both directions, so code and
+CLAUDE.md cannot drift apart quietly. It also pins the count at exactly seven:
+`/api/generate-pdf` deliberately owns composition, scoring, genome encoding and
+builder instructions as internal sub-stages, and that test is what stops a
+later sprint from helpfully splitting them into separate routes.
+
+One version note: FastAPI 0.141 wraps included routers in `_IncludedRouter`,
+which exposes no `.path`, so walking `app.routes` finds nothing. The contract
+test reads the OpenAPI document instead — which is what Design consumes anyway.
 
 ## The vendored canon — refresh process
 

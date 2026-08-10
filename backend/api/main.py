@@ -1,21 +1,14 @@
 """FastAPI application.
 
-STATUS: the 7 pipeline endpoints are NOT defined here yet, and their absence
-is deliberate.
+The 7 pipeline endpoints plus GET /api/blueprints/{id} are declared in
+`routes.py` as a contract stub: real request and response shapes, no bodies.
+Route names are transcribed from CLAUDE.md's "API Contract -- The 7 Pipeline
+Endpoints (canonical list)" and must not be renamed here.
 
-Sprint 0's definition-of-done calls for an OpenAPI contract stub covering the
-7 pipeline endpoints plus GET /api/blueprints/{id}. The canonical route table
-lives in CLAUDE.md under "API Contract -- The 7 Pipeline Endpoints", which has
-not yet reached this repository -- origin/main still carries the older
-CLAUDE.md with no such section.
-
-Design wires its Phase 3 concepts to whatever contract lands here, so guessing
-at route names, payload shapes, or status codes would produce something for
-Design to build against and later discover was invented. The routes go in when
-the table arrives; nothing else in Sprint 0 depends on them.
-
-What exists now: the app object, health checks, and the error contract, so the
-service is deployable and Railway has something to probe.
+Design wires its Phase 3 concepts to this contract, so the shapes are the
+Sprint 0 deliverable. Every stub returns 501 rather than fabricated data --
+a client that receives plausible fake output cannot tell a stub from a
+working endpoint.
 """
 
 from __future__ import annotations
@@ -23,6 +16,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from backend.api.routes import router as pipeline_router
 from backend.config import BLUEPRINT_SCHEMA_VERSION
 
 app = FastAPI(
@@ -33,6 +27,8 @@ app = FastAPI(
     ),
     version="0.1.0",
 )
+
+app.include_router(pipeline_router)
 
 
 class HealthResponse(BaseModel):
