@@ -68,7 +68,51 @@ class FloralCanon:
     checksum: str
 
     def __len__(self) -> int:
+        """Unique SKUs -- the real size of the buyable inventory.
+
+        Not the row count. The canon file carries 546 rows but only 471
+        distinct SKUs: 75 are exact duplicates, same SKU and same product
+        name repeated inside a single species block. Counting rows would
+        overstate stock by 16% and would quietly make any per-SKU cost
+        rollup wrong.
+        """
+        return len(self._by_sku)
+
+    @property
+    def row_count(self) -> int:
+        """Rows as they appear in the file, duplicates included.
+
+        Kept separate so a change in duplication is visible rather than
+        cancelling out against a change in real inventory.
+        """
         return len(self.entries)
+
+    @property
+    def duplicate_skus(self) -> dict[str, int]:
+        """SKU -> number of rows, for SKUs appearing more than once."""
+        counts: dict[str, int] = {}
+        for entry in self.entries:
+            counts[entry.sku] = counts.get(entry.sku, 0) + 1
+        return {sku: n for sku, n in counts.items() if n > 1}
+
+    def annotation_conflicts(self, field: str) -> dict[str, list]:
+        """SKU -> the differing values of `field` across its duplicate rows.
+
+        Input for Sprint 3: these are the annotations someone has to decide
+        between before the selection algorithm can trust them. Identity
+        fields (product_name, price) never conflict; the classification
+        fields do.
+        """
+        rows: dict[str, list[CanonEntry]] = {}
+        for entry in self.entries:
+            rows.setdefault(entry.sku, []).append(entry)
+
+        conflicts: dict[str, list] = {}
+        for sku, group in rows.items():
+            values = {getattr(e, field) for e in group}
+            if len(values) > 1:
+                conflicts[sku] = sorted(values, key=lambda v: (v is None, str(v)))
+        return conflicts
 
     def has_sku(self, sku: str) -> bool:
         return sku.strip().upper() in self._by_sku
@@ -125,6 +169,12 @@ def _parse(raw: dict, source: Path, checksum: str) -> FloralCanon:
 
     # The light-reference tail carries no species block of its own; its rows
     # are self-describing and still represent real, orderable stock.
+    #
+    # Species comes from the product name, NOT from the row's `category`.
+    # `category` holds a role -- its values are accent/filler/focal/foliage/
+    # hero/secondary -- so using it as a species would put "filler" and
+    # "foliage" into the species namespace alongside Peony and Garden Rose,
+    # and any code asking "do we stock this species" would get nonsense.
     for sku_row in raw.get("light_reference_tail", []):
         sku = str(sku_row.get("sku", "")).strip().upper()
         if not sku:
@@ -134,15 +184,33 @@ def _parse(raw: dict, source: Path, checksum: str) -> FloralCanon:
             CanonEntry(
                 sku=sku,
                 product_name=product_name,
-                species=sku_row.get("category", "") or product_name,
-                species_slug=slugify(sku_row.get("category", "") or product_name),
+                species=product_name,
+                species_slug=slugify(product_name),
                 color_name=sku_row.get("color_name"),
                 price=sku_row.get("price"),
+                # `primary_role` is the role field proper; `category` is a
+                # near-duplicate that disagrees with it on some rows.
                 primary_role=sku_row.get("primary_role"),
             )
         )
 
-    by_sku = {e.sku: e for e in entries}
+    # First occurrence wins, stated explicitly rather than left to dict
+    # comprehension semantics (which quietly keep the LAST).
+    #
+    # This matters more than it looks. 75 SKUs appear twice. They always
+    # agree on product name and price -- same physical stem -- but 43
+    # disagree on colour label ("Magenta Pink" vs "Vibrant Fuchsia") and 28
+    # on role (a peony tagged both `filler` and `focal`). Sprint 3's
+    # selection algorithm keys on exactly those two fields, so "whichever
+    # row happened to load last" would make selection depend on file
+    # ordering -- a Rule 6 determinism hazard hiding in a data quirk.
+    #
+    # First-wins is deterministic but arbitrary: it is not a judgment that
+    # the first annotation is the correct one. Resolving which is correct is
+    # Sprint 3's job, with the conflicts surfaced by `annotation_conflicts`.
+    by_sku: dict[str, CanonEntry] = {}
+    for entry in entries:
+        by_sku.setdefault(entry.sku, entry)
     by_species: dict[str, list[CanonEntry]] = {}
     for entry in entries:
         by_species.setdefault(entry.species_slug, []).append(entry)

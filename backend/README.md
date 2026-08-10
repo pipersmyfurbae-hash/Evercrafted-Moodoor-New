@@ -54,6 +54,60 @@ its rule is violated — a tripwire that cannot fail guards nothing.
 import each other, placement could reach an LLM one hop away and the static
 scan would still pass.
 
+## The vendored canon — refresh process
+
+`backend/data/floral-canon.json` is a snapshot. Upstream
+(`evercrafted-floral-canon/references/floral-canon.json`) stays authoritative;
+the snapshot exists so the SKU tripwire runs in CI with no skills directory
+mounted. `test_vendored_snapshot_matches_upstream` fails whenever the two
+differ and upstream is reachable, so drift surfaces on the next test run
+rather than whenever someone notices.
+
+To refresh:
+
+```bash
+python scripts/refresh_canon.py            # report the diff, change nothing
+python scripts/refresh_canon.py --apply    # update the snapshot
+pytest backend/tests/tripwires             # confirm nothing broke
+```
+
+The report names every SKU added and removed and every species change. If the
+count moved, it tells you which constant in
+`tests/tripwires/test_sku_resolution.py` to update — those counts are pinned on
+purpose, so a change in manually-maintained stock has to be acknowledged rather
+than absorbed silently.
+
+**A removed SKU is the case that hurts.** A blueprint already sold may
+reference it, and Rule 2 forbids silent substitution, so the script warns
+loudly instead of treating it as a count change. Those designs need a decision,
+not an auto-fix.
+
+## What the canon actually contains
+
+Worth knowing before Sprint 3, because the headline number is misleading:
+
+| | |
+|---|---|
+| Rows in the file | 546 |
+| **Distinct SKUs** | **471** |
+| SKUs appearing twice | 75 |
+
+`total_skus_in_inventory: 546` counts rows, not SKUs — so CLAUDE.md's "546 real
+SKUs" overstates buyable inventory by 16%. Any COGS or "how much do we stock"
+figure taken from the declared number is wrong by that much.
+
+The 75 duplicates are benign in the way that matters: **product name and price
+never disagree**, so deduplicating by SKU never drops a real stem. They do
+disagree on classification — 43 carry two colour names (`Magenta Pink` vs
+`Vibrant Fuchsia`), 28 carry two roles (a peony tagged both `filler` and
+`focal`).
+
+That is a live hazard for Sprint 3, whose three-phase algorithm keys on exactly
+colour and role. The loader resolves it by taking the first row deterministically
+so the ambiguity can never surface as non-reproducible output under Rule 6 — but
+first-wins is arbitrary, not a judgment that the first annotation is right.
+`canon.annotation_conflicts("primary_role")` lists them for whoever resolves it.
+
 ## Two things to know before Sprint 4 and Sprint 5
 
 **Placement is a stub.** `modules/placement` has a real seeded RNG

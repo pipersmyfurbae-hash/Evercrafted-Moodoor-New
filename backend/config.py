@@ -8,6 +8,8 @@ grep-and-pray across modules.
 from __future__ import annotations
 
 import os
+import re
+from collections.abc import Iterable
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parent
@@ -60,16 +62,147 @@ MAX_BLUEPRINT_SCORE = 120
 
 # --- Human review --------------------------------------------------------
 # CLAUDE.md Rule 8: these emotion tags force an order to pending_review and
-# must never auto-deliver. Matching logic lands in Sprint 6b; the vocabulary
-# is fixed here so the schema and the router cannot disagree about it.
+# must never auto-deliver. Routing lands in Sprint 6b; the vocabulary lives
+# here so the schema and the router cannot disagree about it.
 #
-# Deliberately the exact four from Rule 8, not a superset. The WGS emotion
-# vocabulary also carries "remembrance", which reads memorial-adjacent -- but
-# widening a business-critical trigger set is Bret's call, not a silent one.
-# Open question for Sprint 6b.
+# Widened past Rule 8's original four after a scan of every emotion
+# vocabulary in the ecosystem: the WGS canonical slugs (genome-spec.md), the
+# floral selector's emotion wheel (7 sectors, 19 terms in SAD alone), and the
+# emotional-design-translator's atmosphere archetypes.
+#
+# The line drawn is BEREAVEMENT, not sadness. A term qualifies when it
+# denotes a death or a loss, not when it merely reads sad. That distinction
+# is load-bearing: the SAD sector carries lonely, despair, hurt, empty,
+# abandoned, fragile and a dozen more, and routing all of them to a human
+# would make the review queue mostly false positives -- at which point it
+# gets rubber-stamped and protects nobody.
+#
+# Asymmetric costs justify erring inclusive within bereavement itself: a
+# false positive costs a reviewer under a minute, a false negative
+# auto-delivers an unreviewed memorial blueprint, which is the exact harm
+# Rule 8 exists to prevent.
 REVIEW_REQUIRED_EMOTIONS: frozenset[str] = frozenset(
-    {"grief", "memorial", "sympathy", "loss"}
+    {
+        # Rule 8's original four.
+        "grief",
+        "memorial",
+        "sympathy",
+        "loss",
+        # WGS canonical slug. Memorial in ordinary use.
+        "remembrance",
+        # Bereavement vocabulary found across the ecosystem's emotion tables.
+        "mourning",
+        "bereavement",
+        "condolence",
+        "funeral",
+        "sorrow",
+        "elegy",
+        "in-memory",
+        # Judgment call, and the one to drop first if the queue runs hot:
+        # a WGS slug that covers both sacred/architectural stillness
+        # ("Winter Reverence" in the translator) and memorial registers.
+        # Included because missing a real memorial costs more than a
+        # needless review.
+        "reverence",
+    }
 )
+
+# Scanned and deliberately EXCLUDED -- sadness or mood, not bereavement.
+# Recorded so the next person to ask "why isn't melancholy in there?" gets an
+# answer instead of re-litigating it.
+#   melancholy, lonely, isolated, despair, depressed, hurt, empty, abandoned,
+#   fragile, vulnerable, powerless, disappointed, victimised, guilty,
+#   remorseful, ashamed, embarrassed, inferior
+# "legacy" and "tribute" were also excluded: both appear in the ecosystem but
+# read commemorative-of-the-living at least as often as memorial.
+
+
+# Word stems per trigger, matched against whole tokens by prefix.
+#
+# Prefix-on-token rather than plain substring, for a specific reason: "loss"
+# is a substring of "glossy", and glossy is a texture word used constantly in
+# this domain. Token matching keeps "glossy" from routing an order to a
+# bereavement queue while still catching "grieving" and "bereaved".
+_REVIEW_STEMS: dict[str, tuple[str, ...]] = {
+    "grief": ("grief", "griev"),
+    "memorial": ("memorial",),
+    "sympathy": ("sympath",),
+    "loss": ("loss", "lost"),
+    "remembrance": ("remembr", "remember"),
+    "mourning": ("mourn",),
+    "bereavement": ("bereav",),
+    "condolence": ("condol",),
+    "funeral": ("funeral",),
+    "sorrow": ("sorrow",),
+    "elegy": ("elegy", "elegiac"),
+    "reverence": ("reveren",),
+}
+
+# Phrases matched against the whole normalized string.
+#
+# "memory" is deliberately NOT a stem. The product's entire input is a
+# customer's memory -- CLAUDE.md opens by describing it that way -- so a
+# bare "memory" token would flag every order ever placed. Only the
+# commemorative phrasings trigger.
+_REVIEW_PHRASES: dict[str, tuple[str, ...]] = {
+    "in-memory": ("in-memory", "in-loving-memory", "in-memoriam", "memoriam"),
+}
+
+
+# What may follow a stem for the match to count as an inflection of it.
+#
+# A bare prefix test is too loose: "lossless" starts with "loss" but is not a
+# form of it. Requiring a real word-ending keeps "grieving", "bereaved" and
+# "sorrowful" while rejecting words that merely begin the same way.
+_INFLECTIONS: frozenset[str] = frozenset(
+    {
+        "",
+        "s", "es", "ies",
+        "e", "ed", "ing",
+        "y", "al", "ce",
+        "ance", "ances", "ence", "ences",
+        "ement", "ements",
+        "ful", "fully",
+    }
+)
+
+
+def _normalize_emotion(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+
+
+def _token_matches_stem(token: str, stem: str) -> bool:
+    return token.startswith(stem) and token[len(stem) :] in _INFLECTIONS
+
+
+def requires_human_review(emotions: Iterable[str]) -> str | None:
+    """Return the trigger term that matched, or None.
+
+    Matches word stems rather than exact slugs, so "grieving", "bereaved"
+    and "in memory of my mother" all trigger. An exact-set check would let
+    the most natural phrasings straight through, which is the failure that
+    matters: customers do not write their feelings in slug form, and a real
+    memorial order auto-delivering because the word arrived conjugated is
+    precisely what Rule 8 exists to prevent.
+
+    Returns the term rather than a bool so an order's `review_reason` can
+    name the word that caused it.
+    """
+    for raw in emotions:
+        normalized = _normalize_emotion(raw)
+        if not normalized:
+            continue
+
+        for trigger, phrases in _REVIEW_PHRASES.items():
+            if any(phrase in normalized for phrase in phrases):
+                return trigger
+
+        tokens = normalized.split("-")
+        for trigger in sorted(REVIEW_REQUIRED_EMOTIONS):
+            for stem in _REVIEW_STEMS.get(trigger, (trigger,)):
+                if any(_token_matches_stem(token, stem) for token in tokens):
+                    return trigger
+    return None
 
 # --- Database ------------------------------------------------------------
 # Never hardcode a connection string. Railway provides this in deployment;
